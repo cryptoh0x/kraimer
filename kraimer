@@ -1,0 +1,76 @@
+import json
+import requests
+import logging
+from prettytable import PrettyTable
+from termcolor import colored
+from flipside import Flipside
+
+# Setup logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logger = logging.getLogger()
+
+# Load configuration from config.json
+with open("config.json", "r") as config_file:
+    config = json.load(config_file)
+
+FLIPSIDE_API_KEY = config["FLIPSIDE_API_KEY"]
+OPENSEA_API_KEY = config["OPENSEA_API_KEY"]
+NFT_CONTRACT = config["NFT_CONTRACT"]
+COLLECTION_SLUG = config["COLLECTION_SLUG"]
+
+# Initialize Flipside
+flipside = Flipside(FLIPSIDE_API_KEY, "https://api-v2.flipsidecrypto.xyz")
+
+# Your specific SQL query
+sql_query = """
+-- Your SQL query here
+"""
+
+# Execute the Flipside query (simplified for example purposes)
+# Note: Adapt this part based on how you execute your Flipside query and process results
+query_result_set = flipside.query(sql_query)
+unclaimed_tokens = {}  # This will store token IDs and related info
+
+for row in query_result_set.rows:
+    token_id = str(row['TOKENID'])
+    mint_price = row['mint_price']  # Adapt based on your actual column names
+    claim_status = row['claim_status']  # Adapt based on your actual column names
+    if claim_status == "Not Claimed":
+        unclaimed_tokens[token_id] = {"mint_price": mint_price}
+
+def fetch_all_listings(collection_slug):
+    listings = []
+    next_cursor = None
+    base_url = f"https://api.opensea.io/api/v2/listings/collection/{collection_slug}/all"
+
+    while True:
+        params = {"limit": 100, "next": next_cursor} if next_cursor else {"limit": 100}
+        headers = {'accept': 'application/json', 'x-api-key': OPENSEA_API_KEY}
+        response = requests.get(base_url, headers=headers, params=params)
+        data = response.json()
+        
+        listings.extend(data['listings'])
+        logger.info(f"Fetched {len(data['listings'])} listings. Total: {len(listings)}")
+
+        next_cursor = data.get("next", "")
+        if not next_cursor:
+            break
+
+    return listings
+# Fetch all listings for the collection
+listings = fetch_all_listings(COLLECTION_SLUG)
+
+# Filter listings based on unclaimed tokens and display
+table = PrettyTable()
+table.field_names = [colored('Token ID', 'blue'), colored('Mint Price (ETH)', 'green'), colored('Listing Price (ETH)', 'yellow'), colored('OpenSea Link', 'cyan')]
+
+for listing in listings:
+    token_id = listing['protocol_data']['parameters']['offer'][0]['identifierOrCriteria']
+    if str(token_id) in unclaimed_tokens:
+        mint_price = unclaimed_tokens[str(token_id)]['mint_price']
+        listing_price = float(listing['price']['current']['value']) / (10**18)  # Convert to ETH
+        opensea_link = f"https://opensea.io/assets/{NFT_CONTRACT}/{token_id}"
+        table.add_row([token_id, mint_price, listing_price, opensea_link])
+
+logger.info("Displaying filtered listings in a beautifully formatted table.")
+print(table)
